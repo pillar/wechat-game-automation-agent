@@ -36,10 +36,24 @@ python3 main.py --game endless_winter --use-gemini        # 用 Gemini 云端（
 
 停止：`Ctrl+C`。
 
+## 实时看板（Web Dashboard）
+
+加 `--dashboard` 开启内置 SSE 看板，浏览器打开 http://127.0.0.1:8765/ 实时看每轮的截图、AI 返回、点击坐标标记、verify 结果。
+
+```bash
+python3 main.py --game endless_winter --dashboard
+python3 main.py --game endless_winter --dashboard --dashboard-port 9000   # 换端口
+```
+
+- 左栏轮次列表，右栏详情页：原图上叠红圈（AI 预测）和绿圈（实际执行）坐标
+- 事件同时持久化到 `debug/dashboard/sess-<timestamp>.jsonl`
+- 游戏结束后 HTTP 服务会继续运行（图片仍可浏览），`Ctrl+C` 再退出
+
 ## 调试
 
 - 日志：`tail -f debug/autoplay.log`
 - 每轮截图 + AI 响应：`debug/screenshots/<game>/round_NNN_HHMMSS.{png,txt}`
+- 看板会话回放：`debug/dashboard/sess-<timestamp>.jsonl`
 
 ## 深入阅读
 
