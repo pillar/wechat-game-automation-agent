@@ -7,6 +7,8 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #1217 | 10:53 PM | ✅ | Enhanced Architecture Documentation with Detailed Control Flow and Verification Logic | ~762 |
+| #1214 | 10:52 PM | 🟣 | Real-Time SSE Dashboard for Live Automation Monitoring | ~501 |
 | #1113 | 8:43 PM | ✅ | Documented Cost-Optimization Configuration Tuning Strategy | ~566 |
 | #1102 | 8:32 PM | ✅ | Documented Advanced Systems Architecture | ~636 |
 | #1101 | " | ✅ | Architecture Documentation Updated with Two New Capability Modules | ~231 |

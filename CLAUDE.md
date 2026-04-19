@@ -36,9 +36,14 @@ python3 main.py --game endless_winter --max-rounds 1 --log-level DEBUG
 python3 main.py --use-gemini                                         # Gemini cloud (needs GEMINI_API_KEY in .env)
 python3 main.py --local-api-url http://192.168.1.156:1234            # local Qwen VL (default)
 
+# Live dashboard (SSE + screenshots + coord markers) at http://127.0.0.1:8765/
+python3 main.py --game endless_winter --dashboard
+python3 main.py --game endless_winter --dashboard --dashboard-port 9000
+
 # Debug
 tail -f debug/autoplay.log
-ls debug/screenshots/   # every round's screenshot + AI response is saved here
+ls debug/screenshots/       # every round's screenshot + AI response is saved here
+ls debug/dashboard/         # sess-<ts>.jsonl — every SSE event persisted for replay
 ```
 
 There is no test suite, no linter, no build step. Validate changes by running against the live game in `--dry-run` mode first.
@@ -58,10 +63,13 @@ Open-world tap game with a **dual-system** architecture (see `games/endless_wint
 - **`planner`** (`core/planner.py` + `config/plans/endless_winter.yaml`): DFS task-tree picks the first pending leaf; its `active_task_context()` (description + expected_scene + success_keywords) is injected as the first line of every S1 prompt. Task completion uses **stability** (N consecutive idle rounds in `expected_scene`, configured per leaf via `stability_rounds`) rather than keyword matching — keyword hits were too noisy. Leaves that recur (popups, task bar) set `repeat_until_stable: true` so `mark_success` immediately re-arms them to `STATUS_PENDING`.
 - **`completion_checks`** (`core/completion_checks.py`): optional pluggable check registry. A task can declare `completion_check: qwen_yesno` (or a dict with `type` + kwargs); `Planner.tick(ctx, idle)` dispatches to the registered callable first and only falls back to stability if it returns False. `qwen_yesno` is currently a stub that raises `NotImplementedError` — caught and logged at debug level, so scaffolded yaml entries don't break runtime. Designed for a future "ask the VLM if the task is done" hook.
 - **`memory`** (`core/memory_store.py`, SQLite `data/memory.db`): cross-session trajectories, per-(scene,target) skills that stabilise after 2+ successes, and persistent TTL blacklist (checked in `_do_click`).
-- **`verifier`** (`core/verifier.py`): records expected_scene before acting; after the next frame compares `(scene_after, changed)` to drive `planner.mark_failure`, `memory.record_action`, and `memory.add_blacklist` on failures. Success is now driven by planner stability, not by verifier outcomes.
+- **`verifier`** (`core/verifier.py`): records expected_scene before acting; after the next frame compares `(scene_after, changed)` to drive `planner.mark_failure`, `memory.record_action`, and `memory.add_blacklist` on failures. Success is driven by planner stability, not by verifier outcomes. Outcomes: `success` (scene matched), `scene_drift` (expected_scene set but scene after click didn't match — triggers `planner.mark_failure` but does NOT blacklist the coord, since the click may still be valid in other contexts), `changed` (no expected_scene, pixels moved), `no_change` (expected change but none happened → blacklist), `rejected` (verifier refused).
 - **`learning`** (`core/trajectory_logger.py`): writes one JSONL row per infer+action+verify to `data/trajectories/`. `scripts/export_dpo.py` pairs same-scene success/failure responses into DPO `{prompt, chosen, rejected}`.
 - **`system1.model_family`** (`core/model_router.py`): `qwen_vl` (default) | `ui_tars` | `cogagent`. Non-qwen families go through `_run_system1_routed` and are evaluated by `scripts/run_benchmark.py` against `tests/benchmark/scenarios.yaml`.
 - **`research`** (`core/research.py` + `scripts/fetch_research.py` + `data/research/<game>.md`): Gemini-fetched Chinese guide snippets, cached with markdown frontmatter (`fetched_at`, `refresh_days` staleness check). When enabled, `load_for_prompt(prompt_budget_chars)` returns ≤600 chars that are prepended as `【游戏攻略参考】` to every S1 prompt (ahead of the planner task context). **Defaults to `enabled: false`** — `data/research/endless_winter.md` ships as a cold-start placeholder with hand-written 4X hints; run `python3 scripts/fetch_research.py --game endless_winter` to replace it.
+- **OCR override (`core/text_finder.py` + `game._ocr_snap`)**: wraps macOS Vision API (`VNRecognizeTextRequest`). After the VLM returns `(x, y, target)`, `_ocr_snap` extracts generic keywords from `target` (stripping stopwords like 按钮/图标/的/和…), runs OCR on the screenshot, and snaps the click coord to the nearest matching text box (within `max_dist=400`px, `min_confidence=0.3`). **Generic, no per-button whitelist** — earlier iterations hardcoded a keyword map and became a maintenance treadmill. When `_ocr_snap` returns a hit, the action dict carries `ocr_override=True` so the dashboard can flag it.
+- **Target-repeat stuck detection (`game._do_click`)**: a deque `_recent_targets` (size 3) catches cases where the VLM keeps naming the same button but at a wrong coord (the classic Y-axis hallucination). When the deque is full of identical targets, triggers `TARGET_STUCK`: blacklists the current `(x, y)`, sets `_force_system2=True`, clears the scene cache, aborts this round's click. Shared by S1 and S2 (tracking lives at `_do_click` entry, not inside `_run_system1`).
+- **Dashboard (`utils/dashboard_bus.py` + `utils/dashboard_server.py`)**: `--dashboard` starts a stdlib `ThreadingHTTPServer` (default port 8765) exposing `/` (HTML), `/events` (SSE), `/img?path=...` (screenshots). Game code emits via the module-level `bus.emit(type, data)`; events are fanned out to all SSE clients **and** persisted to `debug/dashboard/sess-<timestamp>.jsonl` for offline replay. Event types: `round_start`, `screenshot_captured`, `infer`, `action` (includes `ocr_override` flag), `verify`, `game_over`. Server is kept alive in `main.py` after `game_loop.run()` returns so screenshots remain viewable; Ctrl+C to exit.
 
 Turning any of these off is a one-line yaml change; turning them all off restores the pure dual-system behaviour.
 

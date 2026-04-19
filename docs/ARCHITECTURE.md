@@ -32,6 +32,8 @@ python3 main.py --game endless_winter [options]
 | `--log-level DEBUG` | 详细日志 | INFO |
 | `--use-gemini` | 强制使用 Gemini 云端 | False |
 | `--use-local` | 使用本地 Qwen VL（`--local-api-url`） | True |
+| `--dashboard` | 启动 SSE 实时看板（HTTP 服务） | False |
+| `--dashboard-port N` | 看板端口 | 8765 |
 
 ### 2.2 启动流程
 
@@ -181,6 +183,17 @@ python3 main.py --game endless_winter [options]
 - `config_loader.py`：pydantic 模型（`GlobalConfig`、`GameConfig`），全部 `extra="allow"` 以便各游戏自由扩展字段。环境变量 `GEMINI_API_KEY` 覆盖 yaml 值。首次运行会生成默认 `settings.yaml`（但默认模型字符串是过时的 `gemini-2.0-flash`，当前实际用 `gemini-flash-latest`）。
 - `logger.py`：标准控制台 + `debug/autoplay.log` 文件双路输出。
 - `image_utils.py`：`save_screenshot` / `draw_crosshair` / `resize_image`，目前只在少量调试场景使用。
+- `dashboard_bus.py` + `dashboard_server.py`（仅当 `--dashboard` 打开）：
+  - `dashboard_bus` 提供模块级 `bus.emit(type, data)` 总线 + `SessionPersister`，所有事件除了推给 SSE 订阅者还落地到 `debug/dashboard/sess-<timestamp>.jsonl`。
+  - `dashboard_server` 启动 `ThreadingHTTPServer`（默认 127.0.0.1:8765）守 `/`（HTML）/`/events`（SSE）/`/img?path=...`（截图）。HTTP 线程是 daemon，`main.py` 在 `game_loop.run()` 返回后主线程阻塞等 `Ctrl+C`，保证图片在游戏结束后仍可浏览。
+  - 事件类型：`round_start` / `screenshot_captured` / `infer` / `action`（含 `ocr_override` 标志） / `verify` / `game_over`。
+
+### 4.7 `core/text_finder.py` — macOS Vision OCR
+
+- 用 pyobjc 包了系统的 `VNRecognizeTextRequest`，识别中文文本（默认 `zh-Hans` + `en-US`）。
+- `find_text(image, keywords, min_confidence)` 返回匹配块列表；`find_nearest(image, keywords, hint_x, hint_y, max_dist)` 在所有匹配里找离提示点最近且 ≤ `max_dist` 的一个。
+- **坐标坑**：Vision 返回的 bounding box 以**左下角**为原点的归一化坐标（0–1），需要翻转 Y 并反归一化：`py = int(h_img - (ny + nh) * h_img)`。
+- 这是 `_ocr_snap` 的后端；不需要额外模型/服务，完全走系统 API。
 
 ---
 
@@ -255,8 +268,15 @@ python3 main.py --game endless_winter [options]
 **CV Snap（`game.py` 中的多个 `_snap_*` 方法）**：
 - HSV 阈值找蓝色/深色 blob → cv2 轮廓 → 按面积 / 纵横比 / 位置过滤
 - 专用 snap：`前往` 按钮（右侧窄蓝色 300–1500 px²，aspect 2–5）、任务栏（底部最宽蓝色带）、关闭按钮（顶部角落）
-- 通用 snap：若 blob 中心距 AI 坐标 ≤ 45px 则用 blob 中心替换，否则保留 AI 坐标
+- **通用 snap 是 opt-in**：只有当 `target` 包含 `图标/头像/箭头/图案/icon` 这类非文本关键词才启用（曾经默认开启导致把坐标拉偏 20px，现在改为按需调用）
 - **保守策略**：不用 MORPH_CLOSE（会把相邻横幅吸进来），距离不够就 return None
+
+**OCR Snap（`game._ocr_snap`，优先于 CV 通用 snap）**：
+- 后端是 `core/text_finder.py`（macOS Vision，见 §4.7）。
+- 对 `target` 做停用词剥离（`_OCR_STOPWORDS` 包含 按钮/图标/的/和/点击…）+ 正则拆词，生成候选 keyword 列表。
+- 以 AI 返回坐标为 hint，在所有识别到的文本块里找最近且 ≤400px 的命中（`min_confidence=0.3`）。命中时 action dict 挂 `ocr_override=True`。
+- **没有按钮白名单**：所有按钮都走同一条路径，新按钮零维护成本。
+- 命中 → 把点击落到 OCR 框中心，绕过 VLM 常见的 Y 轴幻觉（~100–200px 偏差）。
 
 ### 5.4 关键状态字段
 
@@ -296,16 +316,34 @@ analyze_with_retry
  ├─ ChangeDetector → 若 no_change：verifier.verify(scene_after=None, changed=False) → return "NO_CHANGE"
  │                   → _tick_planner(idle=True, screenshot)  ← 稳定性累计
  ├─ SceneClassifier.get_scene() → 同时 verifier.verify(scene_after, changed=True)
- │    └─ verify 结果 → memory.record_action + memory.add_blacklist（失败时，TTL 600s）
- │                    + planner.mark_failure（失败时）
+ │    └─ verify 结果 → memory.record_action + memory.add_blacklist（no_change/rejected 时，TTL 600s）
+ │                    + planner.mark_failure（no_change/rejected/scene_drift 时）
  │                    + trajectory_logger.log
  │    → _tick_planner(idle=not changed, screenshot)  ← 含 completion_check + 稳定性回退
  ├─ System 1
  │    ├─ model_family != qwen_vl → _run_system1_routed（经 model_router）
  │    └─ prompt 首行依次注入：【游戏攻略参考】(research) + planner.active_task_context()
- ├─ S1/S2 成功 → verifier.record(action, expected_scene=active_task.expected_scene)
- └─ _do_click 额外闸门：memory.is_blacklisted(scene, x, y) 命中则拒绝
+ ├─ S1/S2 成功后坐标精修链（按序短路）：
+ │    1. _ocr_snap(target, hint_xy)：OCR 命中就用 OCR 中心，action["ocr_override"]=True
+ │    2. target 含"图标/头像/箭头/图案/icon" → CV 通用 snap（blob ≤45px 生效）
+ │    3. 底栏/关闭按钮等专用 snap（Y 锚点修正）
+ │    最后 verifier.record(action, expected_scene=active_task.expected_scene)
+ └─ _do_click 额外闸门：
+    ├─ _recent_targets 同名满 3 次 → TARGET_STUCK，blacklist 当前坐标、强制 S2、清缓存、拒绝本次
+    └─ memory.is_blacklisted(scene, x, y) 命中则拒绝
 ```
+
+**Verifier outcome → 下游动作映射**（`_consume_verification`）：
+
+| outcome | 触发条件 | memory.add_blacklist | planner.mark_failure |
+|---------|---------|----------------------|---------------------|
+| `success` | scene_matched=True | × | × |
+| `scene_drift` | 设了 expected_scene，scene_after 不匹配但画面变了 | × | ✓ |
+| `changed` | 未设 expected_scene，画面变了 | × | × |
+| `no_change` | 预期变化但未变 | ✓ | ✓ |
+| `rejected` | verifier 判不通过（其他） | ✓ | ✓ |
+
+`scene_drift` 不 blacklist：同一坐标在不同上下文仍可能是合法点击；由 `_recent_targets` 的 TARGET_STUCK 机制兜底去污染明显错的坐标。
 
 ### 5.7 任务完成判定（C 框架 + B 回退）
 
@@ -431,11 +469,16 @@ config/
 
 ## 8. 观测性
 
-三个主要输出：
+五个主要输出：
 
 1. **`debug/autoplay.log`**：全局日志，setup_logger 自动配置文件 handler。
 2. **`debug/screenshots/<game>/round_NNN_HHMMSS.{png,txt}`**：每轮截图 + AI 原始响应（`ScreenCapture.save_debug_screenshot`）。
 3. **`PerformanceStats` 终局报表**：总帧数、avg screenshot/AI ms、平均 confidence、动作类型分布、错误类型分布。
+4. **GameLoop 结束时的诚实计数器**（`_print_stats`）：
+   - `Rounds: N total (M analyzed, K post-action idle)` —— `post_action_skips`（`skip_next_screenshot` 造成的空转）不计入分母，避免虚报成功率。
+   - `Click emission rate: M/N (分析轮的点击发出率)` —— 只是"发出了点击"，不是"点对了"。
+   - `Verified outcomes: total_verified 中 scene_matched 多少 / changed 多少 / no_change 多少` —— 这才是语义级成功率（来自 `PostConditionVerifier` 的 lifetime 计数器）。
+5. **Dashboard（`--dashboard`）**：浏览器实时可视化每轮的截图+坐标标记+AI JSON+verify 结果。事件同时持久化到 `debug/dashboard/sess-<timestamp>.jsonl`，支持事后用任何 jsonl 查看器复盘（或用 `tail -f` 搭 `jq` 看字段）。
 
 ---
 
@@ -463,7 +506,7 @@ config/
 2. **默认模型版本字符串**：`config_loader.py` 默认 `gemini-2.0-flash`，`settings.yaml` 写 `gemini-flash-latest`。文件系统里会生成过时默认，读者容易困惑。
 3. **`pyautogui` 依赖仍在 `requirements.txt`**：实际已全切 cliclick，可以移除。
 4. **`local_api_url` 默认硬编码 IP**（`http://192.168.1.156:1234`）：应走环境变量 / yaml。
-5. **endless_winter game.py 1000+ 行**：System 1 / System 2 / snap 启发式 / 状态管理混在一起，可拆分到 `system1.py`, `system2.py`, `cv_snap.py`。
-6. **prompts 文件 500 行**：包含大量中文长 prompt 字符串 + 解析器，可拆成 `prompts/` 子包。
+5. **endless_winter game.py ~1600 行**：System 1 / System 2 / OCR snap / CV snap / 状态管理 / target-repeat stuck 混在一起，可拆分到 `system1.py`, `system2.py`, `cv_snap.py`, `ocr_snap.py`。
+6. **prompts 文件 ~480 行**：包含大量中文长 prompt 字符串 + 解析器，可拆成 `prompts/` 子包。
 7. **没有单元测试**：`ChangeDetector.compute_mse`、`parse_qwen_ref_bbox`、`StuckMonitor.is_stuck` 都是纯函数，写 pytest 容易且有价值。
 8. **首次启动自动创建 `settings.yaml` 但只建基础结构**，随后 `load_game_config` 又会抛错，初学者体验不统一。
