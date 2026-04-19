@@ -1,0 +1,35 @@
+task:
+  name: "endless_winter_daily"
+  description: "清理弹窗 → 领取邮件 → 收集主城资源 → 执行任务栏当前任务"
+  children:
+    - name: "dismiss_popups"
+      description: "关闭任何弹窗、广告、通知面板，回到主城"
+      expected_scene: "main_city"
+      success_keywords: ["关闭", "返回", "X", "✕", "取消", "跳过"]
+      max_failures: 3
+      stability_rounds: 2
+      repeat_until_stable: true   # 弹窗可能再次出现，随时重入
+
+    - name: "claim_mail"
+      description: "打开邮件面板，一键已读/领取，然后关闭面板"
+      expected_scene: "main_city"
+      success_keywords: ["一键已读", "领取", "邮件"]
+      max_failures: 4
+      stability_rounds: 3
+      repeat_until_stable: false
+
+    - name: "collect_resources"
+      description: "点击主城中带红点的资源图标（木/石/粮/钢）"
+      expected_scene: "main_city"
+      success_keywords: ["资源", "红点", "采集"]
+      max_failures: 5
+      stability_rounds: 4
+      repeat_until_stable: false
+
+    - name: "follow_task_bar"
+      description: "按底部任务栏当前提示推进主线（升级建筑、建造、研究等）"
+      expected_scene: "main_city"
+      success_keywords: ["升级", "建造", "前往", "研究", "任务"]
+      max_failures: 10
+      stability_rounds: 6
+      repeat_until_stable: true   # 主线永远有下一条，重入持续推进

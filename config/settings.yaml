@@ -1,0 +1,20 @@
+# Global configuration for autoplay framework
+
+gemini:
+  api_key: ""  # Set via GEMINI_API_KEY environment variable
+  model: "gemini-flash-latest"  # Fast and cost-effective model
+  timeout: 30
+
+wechat:
+  window_title: "微信"
+  game_area:
+    top_offset: 88      # Height of title bar to skip
+    bottom_offset: 0    # Bottom padding to skip
+
+loop:
+  interval: 1.5         # Seconds between each round
+  max_rounds: 200       # Maximum rounds to run
+
+logging:
+  level: "INFO"         # DEBUG, INFO, WARNING, ERROR
+  save_screenshots: true

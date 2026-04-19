@@ -1,0 +1,28 @@
+# Grounding-accuracy benchmark scenarios.
+#
+# Each scenario points to a screenshot under tests/benchmark/screenshots/
+# and declares the expected target region (pixel coords in the screenshot).
+# run_benchmark.py runs System 1 with the configured model_family and
+# checks whether the predicted (x,y) falls inside expected_region.
+#
+# Populate this file from real gameplay:
+#   1. Copy screenshots from debug/screenshots/endless_winter/round_*.png
+#      to tests/benchmark/screenshots/
+#   2. Open each, note the target button's bounding box in pixel coords
+#   3. Add an entry below
+
+scenarios:
+  # Example entry — replace with real screenshots
+  - id: "dialog_close_01"
+    screenshot: "screenshots/example_dialog.png"
+    scene: "dialog"
+    target_desc: "弹窗关闭按钮 (X)"
+    expected_region: [860, 40, 940, 110]
+    tolerance_px: 0
+
+  - id: "main_city_task_bar"
+    screenshot: "screenshots/example_main_city.png"
+    scene: "main_city"
+    target_desc: "底部任务栏当前任务"
+    expected_region: [30, 1220, 500, 1290]
+    tolerance_px: 10

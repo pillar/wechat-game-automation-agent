@@ -1,0 +1,52 @@
+# Environment
+.env
+.env.local
+
+# Virtualenv
+venv/
+.venv/
+
+# Claude Code local config
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Runtime data (local to each run)
+data/memory.db
+data/trajectories/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Debug
+debug/
+*.log
+
+# Temporary
+*.tmp
+*.bak
+.DS_Store

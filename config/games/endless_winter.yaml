@@ -1,0 +1,67 @@
+name: "endless_winter"
+display_name: "无尽冬日"
+
+system1:
+  enabled: true
+  fail_threshold: 1
+  # qwen_vl (default) | ui_tars | cogagent — see core/model_router.py
+  model_family: "qwen_vl"
+
+system2:
+  enabled: true
+  min_interval_s: 5.0
+
+timing:
+  click_delay: 0.1
+
+vision:
+  top_offset: 40
+  bottom_offset: 0
+  resize_width: 720          # cost-saving mode; set null to restore full-res (see CLAUDE.md)
+
+change_detection:
+  enabled: true
+  threshold: 25              # lower → more NO_CHANGE gating, saves inference
+  roi_skip_top: 0.15
+
+inference:
+  image_format: "webp"
+  image_quality: 50          # cost-saving mode; bump to 70+ if bbox accuracy regresses
+  stale_threshold_s: 60.0
+  stale_mse_threshold: 500
+
+scene_classifier:
+  enabled: true
+  classify_interval_s: 5.0
+
+stuck_monitor:
+  enabled: true
+  click_threshold: 3
+  grid_size: 30
+
+planner:
+  enabled: true
+  plan_path: "config/plans/endless_winter.yaml"
+
+memory:
+  enabled: true
+  # db_path: "data/memory.db"  # default
+  skill_min_success: 1       # promote (scene,target) → skill after 1 success (was 2)
+
+verifier:
+  enabled: true
+  blacklist_ttl_s: 600
+
+learning:
+  enabled: true
+  # out_dir: "data/trajectories"  # default
+
+research:
+  enabled: false             # set true after running scripts/fetch_research.py
+  refresh_days: 30
+  prompt_budget_chars: 600
+  queries:
+    - "无尽冬日 新手攻略"
+    - "无尽冬日 建筑升级顺序"
+    - "无尽冬日 任务优先级"
+    - "无尽冬日 每日日常"
