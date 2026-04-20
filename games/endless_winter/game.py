@@ -549,15 +549,35 @@ class EndlessWinterGame(BaseGame):
             prompt = build_system2_prompt_with_drag(screenshot.width, screenshot.height, history)
             if self._stuck_hint is not None:
                 hint = self._stuck_hint
+                same_target_coords = [
+                    (int(a["x"]), int(a["y"]))
+                    for a in list(self._action_history)
+                    if a.get("target") == hint["target"]
+                    and isinstance(a.get("x"), (int, float))
+                    and isinstance(a.get("y"), (int, float))
+                ]
+                cur = (int(hint["x"]), int(hint["y"]))
+                if cur not in same_target_coords:
+                    same_target_coords.append(cur)
+                radius = self._blacklist_radius
+                min_offset = radius + 20
+                coords_str = "\n".join(f"  - ({cx}, {cy})" for cx, cy in same_target_coords)
                 prompt = (
-                    f"【上轮点击未生效 — 请重新定位】\n"
-                    f"上一轮在像素 ({hint['x']}, {hint['y']}) 点击 \"{hint['target']}\"，"
-                    f"但屏幕没有任何变化，说明该坐标并未命中目标。\n"
-                    f"请仔细重新识别目标按钮的准确像素位置（允许偏差 ±20 像素），"
-                    f"不要返回和上次相同的坐标。如果画面里根本没有这个目标，请选择其它可交互元素。\n\n"
+                    f"【上轮同一目标连续点击失败 — 必须换位置】\n"
+                    f"已在以下像素反复尝试点击 \"{hint['target']}\" 均未生效"
+                    f"（系统已屏蔽半径 {radius}px 范围）：\n"
+                    f"{coords_str}\n"
+                    f"规则：新坐标若落在任一上述点的 {radius}px 范围内会被系统**直接拒绝**。\n"
+                    f"- 若你依然认为目标是 \"{hint['target']}\"，"
+                    f"新的 x 或 y 必须距上述任一点 ≥ {min_offset} 像素；否则请换目标。\n"
+                    f"- 若画面里根本没有真正的 \"{hint['target']}\"，"
+                    f"请改为点击其它可操作元素（右上角 X、左上角 ←、其它按钮）。\n\n"
                     + prompt
                 )
-                logger.info(f"[STUCK] injecting coord-refinement hint: '{hint['target']}' @ ({hint['x']},{hint['y']})")
+                logger.info(
+                    f"[STUCK] injecting coord-refinement hint: '{hint['target']}' "
+                    f"blocked at {same_target_coords}"
+                )
                 self._stuck_hint = None
             response = self._gemini_client.analyze(screenshot, prompt, max_retries=1)
             self._round_prompt = prompt
